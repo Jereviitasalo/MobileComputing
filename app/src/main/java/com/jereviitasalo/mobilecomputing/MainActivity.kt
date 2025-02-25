@@ -30,11 +30,8 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
-import android.content.res.Configuration
-import android.provider.Telephony.Sms.Conversations
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.animateContentSize
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.material3.Button
 import androidx.compose.ui.Alignment
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -42,46 +39,19 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import android.net.Uri
-import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import coil3.compose.AsyncImage
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.draw.clip
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.toArgb
-import androidx.compose.runtime.CompositionLocalProvider
-import coil3.compose.AsyncImagePreviewHandler
-import coil3.request.ImageRequest
 
 import android.content.Context
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.compose.setContent
-import androidx.compose.foundation.Image
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.unit.dp
-import androidx.navigation.compose.NavHost
-import androidx.navigation.compose.composable
-import androidx.navigation.compose.rememberNavController
 import androidx.room.*
-import coil3.compose.AsyncImage
-import com.jereviitasalo.mobilecomputing.ui.theme.MobileComputingTheme
 import java.io.File
-import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
 import com.jereviitasalo.mobilecomputing.ui.theme.MobileComputingTheme
 
@@ -139,7 +109,6 @@ class MainActivity : ComponentActivity() {
         setContent {
             MobileComputingTheme {
 
-                // ----------------------------------------------------------
                 // Tietokantayhteys
                 val context = LocalContext.current
                 val db = remember { AppDatabase.getDatabase(context) }
@@ -157,11 +126,6 @@ class MainActivity : ComponentActivity() {
                     refreshProfile()
                 }
 
-                /*LaunchedEffect(Unit) {
-                    storedProfile = db.userProfileDao().getProfile()
-                }*/
-                // ---------------------------------------------------------
-
 
                 val navController = rememberNavController()
                 NavHost(
@@ -169,12 +133,10 @@ class MainActivity : ComponentActivity() {
                     startDestination = Route.conversation
                 ) {
                     composable(route = Route.conversation) {
-                        // --------------------------------
                         // Varmista, että profiili on ajan tasalla aina kun tähän näkymään saavutaan
                         LaunchedEffect(Unit) {
                             refreshProfile()
                         }
-                        // --------------------------------
                         Conversation(
 
                             messages = SampleData.conversationSample,
@@ -183,27 +145,21 @@ class MainActivity : ComponentActivity() {
                                     popUpTo(Route.conversation) {inclusive = false}
                                 }
                             },
-                            // -------------------------------
                             userProfile = storedProfile
-                            // -------------------------------
                         )
                     }
                     composable(route = Route.profile) {
                         Profile(
                             navigateToConversations = {
-                                // --------------------------------
                                 // Päivitä profiili ennen navigointia takaisin
                                 refreshProfile()
-                                // ---------------------------------
                                 navController.navigate(route = Route.conversation) {
                                     popUpTo(Route.conversation) {inclusive = true}
                                 }
                             },
-                            // ---------------------------------
                             db = db,
                             initialProfile = storedProfile,
                             onProfileUpdated = refreshProfile
-                            // ---------------------------------
                         )
                     }
                 }
@@ -212,19 +168,16 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-// Create message object
+// Luodaan message objekti
 data class Message(val author: String, val body: String)
 
 @Composable
 fun MessageCard(
     msg: Message,
-    // ---------------------------------------
     userProfile: UserProfile? = null,
     context: Context = LocalContext.current
-    // ---------------------------------------
 ) {
     Row(modifier = Modifier.padding(all = 8.dp)) {
-        // -----------------------------------------------------------------
         // Käytä käyttäjän valitsemaa kuvaa, jos sellainen on tallennettu
         if (userProfile?.imageUri != null) {
             AsyncImage(
@@ -236,7 +189,6 @@ fun MessageCard(
                     .border(1.5.dp, MaterialTheme.colorScheme.primary, CircleShape)
             )
         } else {
-        // -------------------------------------------------------------------
             Image(
                 painter = painterResource(R.drawable.profile_picture),
                 contentDescription = "Profile picture",
@@ -260,10 +212,7 @@ fun MessageCard(
 
         Column( modifier = Modifier.clickable { isExpanded = !isExpanded }) {
             Text(
-                //text = msg.author,
-                // ---------------------------------------
                 text = userProfile?.username ?: msg.author,
-                // ---------------------------------------
                 color = MaterialTheme.colorScheme.secondary,
                 style = MaterialTheme.typography.titleSmall
             )
@@ -301,9 +250,7 @@ object Route {
 fun Conversation(
     messages: List<Message>,
     navigateToProfile: () -> Unit,
-    // -------------------------------
     userProfile: UserProfile? = null
-    // -------------------------------
 ) {
     Column {
         Button(onClick = {
@@ -377,7 +324,7 @@ fun Profile(
             )
         }
 
-        // Profiilikuva (pyöreä)
+        // Profiilikuva
         if (imageUri != null) {
             AsyncImage(
                 model = imageUri,
@@ -442,17 +389,6 @@ fun Profile(
             }
         }
     }
-
-    /*Column(
-        Modifier.fillMaxSize(),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
-        Text(text = "User Profile Page")
-        Button(onClick = navigateToConversations) {
-            Text(text = "Conversation")
-        }
-    }*/
 }
 
 //@Preview
