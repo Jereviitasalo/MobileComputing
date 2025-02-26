@@ -3,30 +3,14 @@ package com.jereviitasalo.mobilecomputing
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
@@ -45,7 +29,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import coil3.compose.AsyncImage
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.Color
-
 import android.content.Context
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
@@ -54,6 +37,22 @@ import androidx.room.*
 import java.io.File
 import androidx.compose.foundation.background
 import com.jereviitasalo.mobilecomputing.ui.theme.MobileComputingTheme
+import android.Manifest
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
+import android.os.Build
+import androidx.core.app.ActivityCompat
+import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
+import kotlin.math.abs
 
 // Entity - tietokantataulu käyttäjäprofiilille
 @Entity(tableName = "user_profile")
@@ -66,7 +65,7 @@ data class UserProfile(
     val imageUri: String?
 )
 
-// DAO - tietokantaoperaatiot
+// Tietokantaoperaatiot
 @Dao
 interface UserProfileDao {
     @Query("SELECT * FROM user_profile LIMIT 1")
@@ -79,7 +78,7 @@ interface UserProfileDao {
     fun updateProfile(profile: UserProfile)
 }
 
-// Database - tietokanta
+// Tietokanta
 @Database(entities = [UserProfile::class], version = 1)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun userProfileDao(): UserProfileDao
@@ -94,7 +93,7 @@ abstract class AppDatabase : RoomDatabase() {
                     context.applicationContext,
                     AppDatabase::class.java,
                     "app_database"
-                ).allowMainThreadQueries() // Vain demotarkoitukseen
+                ).allowMainThreadQueries()
                     .build()
                 INSTANCE = instance
                 instance
@@ -103,9 +102,48 @@ abstract class AppDatabase : RoomDatabase() {
     }
 }
 
-class MainActivity : ComponentActivity() {
+class MainActivity : ComponentActivity(), SensorEventListener {
+    // sensori- ja ilmoitusmuuttujat
+    private lateinit var sensorManager: SensorManager
+    private var gyroscope: Sensor? = null
+    private var isMonitoring = false
+
+    // Ilmoituskanavan tunniste
+    companion object {
+        const val CHANNEL_ID = "gyroscope_channel"
+        // Permission request code
+        private const val NOTIFICATION_PERMISSION_CODE = 123
+    }
+
+    // Määritellään ilmoituksen permission launcher
+    private lateinit var requestPermissionLauncher: androidx.activity.result.ActivityResultLauncher<String>
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        createNotificationChannel()
+
+        // Sensorin alustus - käytetään gyroskooppia
+        sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
+        gyroscope = sensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE)
+
+        requestPermissionLauncher = registerForActivityResult(
+            ActivityResultContracts.RequestPermission()
+        ) { isGranted: Boolean ->
+            // Käsitellään vastaus lupapyyntöön
+            val permissionState = if (isGranted) {
+                // Lupa myönnetty, käynnistetään monitorointi
+                startMonitoring()
+                true
+            } else {
+                // Lupaa ei myönnetty
+                false
+            }
+
+            // Päivitetään UI state
+            isMonitoring = permissionState
+        }
+
         setContent {
             MobileComputingTheme {
 
@@ -126,8 +164,12 @@ class MainActivity : ComponentActivity() {
                     refreshProfile()
                 }
 
+                var monitoringState by remember { mutableStateOf(isMonitoring) }
+                // State notifikaatioluvalle
+                var permissionRequested by remember { mutableStateOf(hasNotificationPermission()) }
 
                 val navController = rememberNavController()
+
                 NavHost(
                     navController = navController,
                     startDestination = Route.conversation
@@ -138,14 +180,13 @@ class MainActivity : ComponentActivity() {
                             refreshProfile()
                         }
                         Conversation(
-
                             messages = SampleData.conversationSample,
                             navigateToProfile = {
                                 navController.navigate(Route.profile) {
                                     popUpTo(Route.conversation) {inclusive = false}
                                 }
                             },
-                            userProfile = storedProfile
+                            userProfile = storedProfile,
                         )
                     }
                     composable(route = Route.profile) {
@@ -159,10 +200,121 @@ class MainActivity : ComponentActivity() {
                             },
                             db = db,
                             initialProfile = storedProfile,
-                            onProfileUpdated = refreshProfile
+                            onProfileUpdated = refreshProfile,
+                            onToggleMonitoring = {
+                                if (!permissionRequested) {
+                                    // Käynnistä lupapyyntö
+                                    askNotificationPermission()
+                                    permissionRequested = hasNotificationPermission()
+                                } else if (monitoringState == false) {
+                                    startMonitoring()
+                                    monitoringState = true
+                                } else {
+                                    stopMonitoring()
+                                    monitoringState = false
+                                }
+                            },
+                            isMonitoring = monitoringState
                         )
                     }
                 }
+            }
+        }
+    }
+
+    // Metodi notifikaatioluvan pyytämiseen
+    private fun askNotificationPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (!hasNotificationPermission()) {
+                requestPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            } else {
+                startMonitoring()
+                isMonitoring = true
+            }
+        }
+    }
+
+    // LISÄTTY: Metodi joka tarkistaa onko notifikaatiolupa jo olemassa
+    private fun hasNotificationPermission(): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.POST_NOTIFICATIONS
+            ) == PackageManager.PERMISSION_GRANTED
+        } else {
+            // Vanhemmilla Android-versioilla oletetaan, että lupa on
+            true
+        }
+    }
+
+    private fun startMonitoring() {
+        gyroscope?.let {
+            sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_NORMAL)
+            isMonitoring = true
+        }
+    }
+
+    private fun stopMonitoring() {
+        sensorManager.unregisterListener(this)
+        isMonitoring = false
+    }
+
+    override fun onSensorChanged(event: SensorEvent) {
+        if (event.sensor.type == Sensor.TYPE_GYROSCOPE) {
+            val x = event.values[0]
+            val y = event.values[1]
+            val z = event.values[2]
+
+            // Jos tapahtuu pyörähdys millä tahansa akselilla, lähetetään ilmoitus
+            if (abs(x) > 0.01 || abs(y) > 0.01 || abs(z) > 0.01) {
+                sendNotification("$y")
+            }
+        }
+    }
+
+    override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
+
+    // Ilmoitusten käsittely
+    private fun createNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val name = "Gyroscope Detection"
+            val descriptionText = "Notifications for gyroscope motion"
+            val importance = NotificationManager.IMPORTANCE_HIGH
+            val channel = NotificationChannel(CHANNEL_ID, name, importance).apply {
+                description = descriptionText
+            }
+
+            val notificationManager: NotificationManager =
+                getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            notificationManager.createNotificationChannel(channel)
+        }
+    }
+
+    private fun sendNotification(message: String) {
+        // Intent, joka avaa sovelluksen, kun ilmoitusta painetaan
+        val intent = Intent(this, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+        }
+
+        val pendingIntent: PendingIntent = PendingIntent.getActivity(
+            this, 0, intent, PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val builder = NotificationCompat.Builder(this, CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setContentTitle("Liikettä havaittu")
+            .setContentText(message)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setContentIntent(pendingIntent)
+            .setAutoCancel(true)
+
+        with(NotificationManagerCompat.from(this)) {
+            if (ActivityCompat.checkSelfPermission(
+                    this@MainActivity,
+                    Manifest.permission.POST_NOTIFICATIONS
+                ) == PackageManager.PERMISSION_GRANTED
+            ) {
+                notify(1, builder.build())
             }
         }
     }
@@ -174,8 +326,7 @@ data class Message(val author: String, val body: String)
 @Composable
 fun MessageCard(
     msg: Message,
-    userProfile: UserProfile? = null,
-    context: Context = LocalContext.current
+    userProfile: UserProfile? = null
 ) {
     Row(modifier = Modifier.padding(all = 8.dp)) {
         // Käytä käyttäjän valitsemaa kuvaa, jos sellainen on tallennettu
@@ -199,13 +350,10 @@ fun MessageCard(
             )
         }
 
-        // Some horizontal spacing between image and text
         Spacer(modifier = Modifier.width(8.dp))
 
-        // Variable to keep track if message is expanded or not
         var isExpanded by remember { mutableStateOf(false) }
 
-        // surfaceColor will be updated gradually from one color to the other
         val surfaceColor by animateColorAsState(
             if (isExpanded) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface,
         )
@@ -216,7 +364,6 @@ fun MessageCard(
                 color = MaterialTheme.colorScheme.secondary,
                 style = MaterialTheme.typography.titleSmall
             )
-            // Some vertical spacing between texts
             Spacer(modifier = Modifier.height(4.dp))
 
             Surface(
@@ -230,9 +377,6 @@ fun MessageCard(
                 Text(
                     text = msg.body,
                     modifier = Modifier.padding(all = 4.dp),
-
-                    // IF message is expanded, display all its content
-                    // otherwise we only display the first line
                     maxLines = if (isExpanded) Int.MAX_VALUE else 1,
                     style = MaterialTheme.typography.bodyMedium
                 )
@@ -246,21 +390,28 @@ object Route {
     const val profile = "profile"
 }
 
+
 @Composable
 fun Conversation(
     messages: List<Message>,
     navigateToProfile: () -> Unit,
-    userProfile: UserProfile? = null
+    userProfile: UserProfile? = null,
 ) {
     Column {
-        Button(onClick = {
-            println("Navigating to Profile")
-            navigateToProfile()
-        },
-            modifier = Modifier.padding(8.dp)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Text(text = "Profile")
+            Button(onClick = {
+                println("Navigating to Profile")
+                navigateToProfile()
+            }) {
+                Text(text = "Profile")
+            }
         }
+
         LazyColumn(
             modifier = Modifier.fillMaxSize().padding(8.dp)
         ) {
@@ -276,9 +427,21 @@ fun Profile(
     navigateToConversations: () -> Unit,
     db: AppDatabase,
     initialProfile: UserProfile? = null,
-    onProfileUpdated: () -> Unit = {}
+    onProfileUpdated: () -> Unit = {},
+    onToggleMonitoring: () -> Unit = {},
+    isMonitoring: Boolean = false
 ) {
     val context = LocalContext.current
+
+    // Tarkista lupatila
+    val hasPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.POST_NOTIFICATIONS
+        ) == PackageManager.PERMISSION_GRANTED
+    } else {
+        true
+    }
 
     // Käytetään useEffect-tyyppistä ratkaisua, jotta komponentti päivittyy kun initialProfile muuttuu
     var username by remember(initialProfile) { mutableStateOf(initialProfile?.username ?: "") }
@@ -307,7 +470,6 @@ fun Profile(
             .padding(16.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // Otsikko (Conversation) näkyy ylhäällä sinisessä napissa
         Button(
             onClick = navigateToConversations,
             modifier = Modifier
@@ -374,6 +536,21 @@ fun Profile(
             )
         }
 
+        Spacer(modifier = Modifier.height(16.dp))
+
+        if (!hasPermission || isMonitoring) {
+            Button(
+                onClick = onToggleMonitoring,
+                shape = RoundedCornerShape(20.dp),
+            ) {
+                Text(
+                    text = if (isMonitoring) "Notifications active" else "Enable notifications",
+                    color = Color.Black,
+                    style = MaterialTheme.typography.titleMedium
+                )
+            }
+        }
+
         // Automaattinen tallennus kun poistutaan näkymästä
         DisposableEffect(username, imageUri) {
             onDispose {
@@ -390,26 +567,3 @@ fun Profile(
         }
     }
 }
-
-//@Preview
-//@Composable
-//fun ConversationPreview() {
-//    MobileComputingTheme {
-//        Conversation(messages = SampleData.conversationSample, )
-//    }
-//}
-
-//@Preview(name = "Light Mode")
-//@Preview(
-//    name = "Dark Mode",
-//    uiMode = Configuration.UI_MODE_NIGHT_YES,
-//    showBackground = true
-//)
-//@Composable
-//fun MessageCardPreview() {
-//    MobileComputingTheme {
-//        Surface {
-//            MessageCard(msg = Message("User 1", "This is a preview message!"))
-//        }
-//    }
-//}
