@@ -60,6 +60,8 @@ dependencies {
     debugImplementation(libs.androidx.ui.test.manifest)
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("io.coil-kt.coil3:coil-compose:3.1.0")
+    implementation("androidx.core:core-splashscreen:1.0.1")
+    implementation("com.google.android.gms:play-services-base:latest.version")
 
     val nav_version = "2.8.5"
 

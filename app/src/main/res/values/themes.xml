@@ -1,5 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <!-- Splash screen teema -->
+    <style name="Theme.App.Starting" parent="Theme.SplashScreen">
+        <!-- Aseta splash screen taustakuva -->
+        <item name="windowSplashScreenBackground">@color/white</item>
+
+        <!-- Käytä sovelluksen ikonia keskellä -->
+        <item name="windowSplashScreenAnimatedIcon">@drawable/animated_splash_icon</item>
+
+        <!-- Määritä animaation kesto (msec) -->
+        <item name="windowSplashScreenAnimationDuration">1500</item>
+
+        <item name="postSplashScreenTheme">@style/Theme.MobileComputing</item>
+    </style>
 
     <style name="Theme.MobileComputing" parent="android:Theme.Material.Light.NoActionBar" />
 </resources>

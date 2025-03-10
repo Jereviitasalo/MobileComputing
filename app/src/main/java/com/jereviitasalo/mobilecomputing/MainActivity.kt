@@ -38,6 +38,7 @@ import java.io.File
 import androidx.compose.foundation.background
 import com.jereviitasalo.mobilecomputing.ui.theme.MobileComputingTheme
 import android.Manifest
+import android.animation.ObjectAnimator
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -48,10 +49,14 @@ import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.os.Build
+import android.view.View
+import android.view.animation.AccelerateInterpolator
+import androidx.core.animation.doOnEnd
 import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import kotlin.math.abs
 
 // Entity - tietokantataulu käyttäjäprofiilille
@@ -79,9 +84,10 @@ interface UserProfileDao {
 }
 
 // Tietokanta
-@Database(entities = [UserProfile::class], version = 1)
+@Database(entities = [UserProfile::class, Message::class], version = 2)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun userProfileDao(): UserProfileDao
+    abstract fun messageDao(): MessageDao
 
     companion object {
         @Volatile
@@ -94,6 +100,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "app_database"
                 ).allowMainThreadQueries()
+                    .fallbackToDestructiveMigration() // Tämä mahdollistaa version päivityksen
                     .build()
                 INSTANCE = instance
                 instance
@@ -119,6 +126,36 @@ class MainActivity : ComponentActivity(), SensorEventListener {
     private lateinit var requestPermissionLauncher: androidx.activity.result.ActivityResultLauncher<String>
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        val splashScreen = installSplashScreen()
+
+        var isAppReady = false
+        splashScreen.setKeepOnScreenCondition { !isAppReady }
+
+        // Lisää animaatio splash screenin poistuessa
+        splashScreen.setOnExitAnimationListener { splashScreenView ->
+            // Luo fade-out animaatio
+            val fadeOut = ObjectAnimator.ofFloat(
+                splashScreenView.view,
+                View.ALPHA,
+                1f,
+                0f
+            )
+            fadeOut.interpolator = AccelerateInterpolator()
+            fadeOut.duration = 500L // 500ms animaation kesto
+
+            // Animaation päättyessä poistetaan splash screen näkymä
+            fadeOut.doOnEnd { splashScreenView.remove() }
+
+            // Käynnistä animaatio
+            fadeOut.start()
+        }
+
+        // Näytä splash screen 3 sekuntia
+        val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
+        mainHandler.postDelayed({
+            isAppReady = true
+        }, 3000)
+
         super.onCreate(savedInstanceState)
 
         createNotificationChannel()
@@ -180,7 +217,7 @@ class MainActivity : ComponentActivity(), SensorEventListener {
                             refreshProfile()
                         }
                         Conversation(
-                            messages = SampleData.conversationSample,
+                            messages = emptyList(),
                             navigateToProfile = {
                                 navController.navigate(Route.profile) {
                                     popUpTo(Route.conversation) {inclusive = false}
@@ -320,8 +357,28 @@ class MainActivity : ComponentActivity(), SensorEventListener {
     }
 }
 
-// Luodaan message objekti
-data class Message(val author: String, val body: String)
+// Luodaan message tietokantataulu
+@Entity(tableName = "messages")
+data class Message(
+    @PrimaryKey(autoGenerate = true)
+    val id: Int = 0,
+    @ColumnInfo(name = "author")
+    val author: String,
+    @ColumnInfo(name = "body")
+    val body: String,
+    @ColumnInfo(name = "timestamp")
+    val timestamp: Long = System.currentTimeMillis()
+)
+
+// Dao luokka viestien käsittelyyn
+@Dao
+interface MessageDao {
+    @Query("SELECT * FROM messages ORDER BY timestamp ASC")
+    fun getAllMessages(): List<Message>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    fun insertMessage(message: Message)
+}
 
 @Composable
 fun MessageCard(
@@ -397,6 +454,20 @@ fun Conversation(
     navigateToProfile: () -> Unit,
     userProfile: UserProfile? = null,
 ) {
+    val context = LocalContext.current
+    val db = remember { AppDatabase.getDatabase(context) }
+
+    // Hae viestit tietokannasta, jos ne ovat tyhjiä
+    var messagesList by remember { mutableStateOf(messages) }
+    var newMessageText by remember { mutableStateOf("") }
+
+    LaunchedEffect(Unit) {
+        // Lataa viestit tietokannasta, jos messages-lista on tyhjä
+        if (messagesList.isEmpty()) {
+            messagesList = db.messageDao().getAllMessages()
+        }
+    }
+
     Column {
         Row(
             modifier = Modifier
@@ -411,12 +482,53 @@ fun Conversation(
                 Text(text = "Profile")
             }
         }
-
+        // Viestilista
         LazyColumn(
-            modifier = Modifier.fillMaxSize().padding(8.dp)
+            modifier = Modifier.weight(1f).fillMaxWidth().padding(8.dp)
         ) {
-            items(messages) {
+            items(messagesList) {
                     message -> MessageCard(message, userProfile)
+            }
+        }
+
+        // Viestin kirjoittaminen
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            OutlinedTextField(
+                value = newMessageText,
+                onValueChange = { newMessageText = it },
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(end = 8.dp),
+                placeholder = { Text("Kirjoita viesti...") },
+                maxLines = 2
+            )
+
+            Button(
+                onClick = {
+                    if (newMessageText.isNotBlank()) {
+                        val authorName = userProfile?.username ?: "Me"
+                        val newMessage = Message(
+                            author = authorName,
+                            body = newMessageText
+                        )
+
+                        // Tallenna viesti tietokantaan
+                        db.messageDao().insertMessage(newMessage)
+
+                        // Päivitä viestilista
+                        messagesList = db.messageDao().getAllMessages()
+
+                        // Tyhjennä viestinkirjoituskenttä
+                        newMessageText = ""
+                    }
+                }
+            ) {
+                Text("Lähetä")
             }
         }
     }

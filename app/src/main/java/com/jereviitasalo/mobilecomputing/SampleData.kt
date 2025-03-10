@@ -3,6 +3,8 @@ package com.jereviitasalo.mobilecomputing
 /**
  * SampleData for Jetpack Compose Tutorial
  */
+
+/*
 object SampleData {
     // Sample conversation data
     val conversationSample = listOf(
@@ -81,3 +83,4 @@ object SampleData {
         ),
     )
 }
+*/
